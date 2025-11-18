@@ -59,7 +59,7 @@ El cliente opera bajo un modelo concurrente.
 
 ---
 
-# 🛠 Nota sobre la Modificacion en `passivesock.c`
+# Nota sobre la Modificacion en `passivesock.c`
 
 El archivo `passivesock.c` original esta disenado solo para servidores que usan puertos fijos (ftp, telnet, etc.). Su comportamiento original es:
 
@@ -152,4 +152,4 @@ El comando `pwd` responde aun mientras el archivo se transfiere en segundo plano
 
 ## Autor
 
-- Wilson Inga+
+- Wilson Inga
