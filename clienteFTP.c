@@ -1,4 +1,3 @@
-
 /* clienteFTP.c - clienteFTP */
 
 #include <sys/types.h>
@@ -17,12 +16,9 @@
 #define LINELEN 1024
 #define BUFSIZE 4096
 
-/* Declaraciones de las funciones de biblioteca */
 extern int connectTCP(const char *host, const char *service);
 extern int passiveTCP(const char *service, int qlen);
 extern int errexit(const char *format, ...);
-
-/* --- Funciones Auxiliares Provistas --- */
 
 /* Envia cmds FTP al servidor, recibe respuestas y las despliega */
 void sendCmd(int s, char *cmd, char *res) {
@@ -249,7 +245,6 @@ void do_put(int s_ctrl, char *filename, int modo_activo) {
         
         local_file = fopen(filename, "rb");
         if (local_file == NULL) {
-            // No podemos usar errexit porque mataria al hijo
             printf("Error: No se pudo abrir el archivo local '%s'.\n", filename);
             close(sdata);
             exit(1);
@@ -364,7 +359,7 @@ int main(int argc, char *argv[]) {
     // (Omitimos deshabilitar el eco de la terminal por simplicidad)
     printf("Contrasena: ");
     fgets(user_cmd, sizeof(user_cmd), stdin);
-    user_cmd[strcspn(user_cmd, "\n")] = 0; // Quitar newline
+    user_cmd[strcspn(user_cmd, "\n")] = 0; 
     
     sprintf(cmd, "PASS %s", user_cmd);
     sendCmd(s_ctrl, cmd, res); //
@@ -419,7 +414,6 @@ int main(int argc, char *argv[]) {
                 sendCmd(s_ctrl, cmd, res);
             }
         }
-        // --- Comandos Extra ---
         else if (strncmp(cmd, "pwd", 3) == 0) {
             sprintf(cmd, "PWD");
             sendCmd(s_ctrl, cmd, res); //
@@ -448,7 +442,7 @@ int main(int argc, char *argv[]) {
         else {
             printf("Comando desconocido. Escriba 'help' para ayuda.\n");
         }
-    } // Fin del while(1)
+    } 
 
     close(s_ctrl);
     printf("Sesion FTP finalizada.\n");
