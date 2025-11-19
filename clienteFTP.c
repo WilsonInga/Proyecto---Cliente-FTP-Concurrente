@@ -1,3 +1,4 @@
+
 /* clienteFTP.c - clienteFTP */
 
 #include <sys/types.h>
@@ -16,9 +17,12 @@
 #define LINELEN 1024
 #define BUFSIZE 4096
 
+/* Declaraciones de las funciones de biblioteca */
 extern int connectTCP(const char *host, const char *service);
 extern int passiveTCP(const char *service, int qlen);
 extern int errexit(const char *format, ...);
+
+/* --- Funciones Auxiliares Provistas --- */
 
 /* Envia cmds FTP al servidor, recibe respuestas y las despliega */
 void sendCmd(int s, char *cmd, char *res) {
@@ -88,14 +92,14 @@ int pasivo (int s){
 
 /* Implementacion de MODO ACTIVO (PORT) */
 int activo(int s_ctrl) {
-    int slisten, sdata;
+    int slisten;
     struct sockaddr_in sin;
     socklen_t sin_len = sizeof(sin);
     char cmd[128], res[LINELEN];
     char my_ip_str[INET_ADDRSTRLEN];
     unsigned int my_port;
     
-    // 1. Crear un socket pasivo en un puerto efimero (0)
+    // 1. Crear un socket pasivo en un puerto temporal (0)
     // Usamos "0" para que el SO elija un puerto
     slisten = passiveTCP("0", 1); 
 
@@ -129,29 +133,23 @@ int activo(int s_ctrl) {
         return -1;
     }
 
-    // 5. Aceptar la conexion entrante del servidor
-    sdata = accept(slisten, (struct sockaddr *)NULL, NULL);
-    if (sdata < 0)
-        errexit("accept (activo): %s\n", strerror(errno));
-
-    close(slisten); // Ya no necesitamos el socket de escucha
-    return sdata;
+    return slisten;
 }
 
 
 void ayuda () {
-    printf ("Cliente FTP Concurrente. Comandos disponibles:\n \
-    help \t\t- Despliega este texto\n \
-    dir \t\t- Lista el directorio actual del servidor (LIST)\n \
-    get <archivo>\t- Copia el archivo desde el servidor (RETR, PASV)\n \
-    put <archivo>\t- Copia el archivo hacia el servidor (STOR, PASV)\n \
-    pput <archivo>\t- Copia el archivo hacia el servidor (STOR, PORT)\n \
-    cd <dir>\t\t- Cambia al directorio 'dir' en el servidor (CWD)\n \
-    pwd\t\t\t- Muestra el directorio de trabajo actual (PWD)\n \
-    mkdir <dir>\t\t- Crea el directorio 'dir' en el servidor (MKD)\n \
-    dele <archivo>\t- Borra el 'archivo' en el servidor (DELE)\n \
-    rest <bytes>\t- Fija el punto de reinicio para la prox. transferencia (REST)\n \
-    quit\t\t- Finaliza la sesion FTP (QUIT)\n\n");
+    printf ("Cliente FTP Concurrente. Comandos disponibles:\n"
+            " help \t\t- Despliega este texto\n"
+            " dir \t\t- Lista el directorio actual del servidor (LIST)\n"
+            " get <archivo>\t- Copia el archivo desde el servidor (RETR, PASV)\n"
+            " put <archivo>\t- Copia el archivo hacia el servidor (STOR, PASV)\n"
+            " pput <archivo>\t- Copia el archivo hacia el servidor (STOR, PORT)\n"
+            " cd <dir>\t\t- Cambia al directorio 'dir' en el servidor (CWD)\n"
+            " pwd\t\t\t- Muestra el directorio de trabajo actual (PWD)\n"
+            " mkdir <dir>\t- Crea el directorio 'dir' en el servidor (MKD)\n"
+            " dele <archivo>\t- Borra el 'archivo' en el servidor (DELE)\n"
+            " rest <bytes>\t- Fija el punto de reinicio (REST)\n"
+            " quit\t\t- Finaliza la sesion FTP (QUIT)\n\n");
 }
 
 void salir (char *msg) {
@@ -216,60 +214,74 @@ void do_get(int s_ctrl, char *filename) {
 
 // Sube un archivo (STOR) usando PASV
 void do_put(int s_ctrl, char *filename, int modo_activo) {
-    int sdata, pid, n;
+    int sdata, slisten = -1, pid, n;
     char cmd[128], res[LINELEN];
     char buffer[BUFSIZE];
     FILE *local_file;
 
+    /* --- PASO 1: Preparar la conexion --- */
     if (modo_activo) {
-        sdata = activo(s_ctrl); // 1. Establecer canal de datos PORT
+        // En modo activo, obtenemos el socket que ESCUCHA (todavia sin conexion)
+        slisten = activo(s_ctrl);
+        if (slisten < 0) return;
     } else {
-        sdata = pasivo(s_ctrl); // 1. Establecer canal de datos PASV
+        // En modo pasivo, obtenemos el socket CONECTADO
+        sdata = pasivo(s_ctrl); 
+        if (sdata < 0) return;
     }
-    if (sdata < 0) return;
 
-    sprintf(cmd, "STOR %s", filename); // 2. Enviar comando STOR
+    /* --- PASO 2: Enviar comando STOR --- */
+    // El servidor necesita esto ANTES de conectarse en modo activo
+    sprintf(cmd, "STOR %s", filename); 
     sendCmd(s_ctrl, cmd, res);
 
     if (res[0] != '1') { // Esperamos "150 Opening data connection..."
         printf("Error: No se pudo iniciar la transferencia.\n");
-        close(sdata);
+        if (modo_activo) close(slisten);
+        else close(sdata);
         return;
     }
 
-    pid = fork(); // 3. Crear proceso hijo concurrente
+    /* --- PASO 3: Completar conexion (Solo Modo Activo) --- */
+    if (modo_activo) {
+        // AHORA que enviamos STOR, el servidor intentara conectarse. Aceptamos.
+        sdata = accept(slisten, (struct sockaddr *)NULL, NULL);
+        close(slisten); // Ya no necesitamos escuchar
+        if (sdata < 0) {
+            printf("Error al aceptar conexion de datos (Modo Activo).\n");
+            return;
+        }
+    }
+
+    /* --- PASO 4: Transferencia (Fork) --- */
+    pid = fork(); 
     if (pid < 0) errexit("fork: %s\n", strerror(errno));
     
-    if (pid == 0) { // --- Proceso Hijo (Esclavo) ---
-        close(s_ctrl); // El hijo no usa el canal de control
+    if (pid == 0) { // --- Hijo ---
+        close(s_ctrl);
         
         local_file = fopen(filename, "rb");
         if (local_file == NULL) {
-            printf("Error: No se pudo abrir el archivo local '%s'.\n", filename);
+            printf("Error: No se pudo abrir '%s'.\n", filename);
             close(sdata);
             exit(1);
         }
         
         printf("...Iniciando subida de %s...\n", filename);
         while ((n = fread(buffer, 1, BUFSIZE, local_file)) > 0) {
-            if (write(sdata, buffer, n) < 0) {
-                printf("Error al escribir en socket de datos.\n");
-                break; // Salir del bucle si hay error de escritura
-            }
+            if (write(sdata, buffer, n) < 0) break;
         }
         
         fclose(local_file);
-        close(sdata); // Importante: cerrar sdata indica fin de transferencia
+        close(sdata);
         printf("...Subida de %s completada...\n", filename);
-        exit(0); // El hijo termina
+        exit(0);
     
-    } else { // --- Proceso Padre (Maestro) ---
-        close(sdata); // El padre no usa el canal de datos
-        // 4. El padre espera la confirmacion en el canal de control
+    } else { // --- Padre ---
+        close(sdata);
         readRes(s_ctrl, res); // Espera "226 Transfer complete."
     }
 }
-
 // Lista el directorio (LIST)
 void do_dir(int s_ctrl) {
     int sdata, pid, n;
@@ -359,7 +371,7 @@ int main(int argc, char *argv[]) {
     // (Omitimos deshabilitar el eco de la terminal por simplicidad)
     printf("Contrasena: ");
     fgets(user_cmd, sizeof(user_cmd), stdin);
-    user_cmd[strcspn(user_cmd, "\n")] = 0; 
+    user_cmd[strcspn(user_cmd, "\n")] = 0; // Quitar newline
     
     sprintf(cmd, "PASS %s", user_cmd);
     sendCmd(s_ctrl, cmd, res); //
@@ -414,6 +426,7 @@ int main(int argc, char *argv[]) {
                 sendCmd(s_ctrl, cmd, res);
             }
         }
+        // --- Comandos Extra ---
         else if (strncmp(cmd, "pwd", 3) == 0) {
             sprintf(cmd, "PWD");
             sendCmd(s_ctrl, cmd, res); //
@@ -442,7 +455,7 @@ int main(int argc, char *argv[]) {
         else {
             printf("Comando desconocido. Escriba 'help' para ayuda.\n");
         }
-    } 
+    } // Fin del while(1)
 
     close(s_ctrl);
     printf("Sesion FTP finalizada.\n");
