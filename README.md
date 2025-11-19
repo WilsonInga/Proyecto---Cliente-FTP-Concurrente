@@ -131,7 +131,7 @@ Debe aparecer:
 * `passivesock.c` / `passiveTCP.c`: Sockets de escucha (Modo Activo).
 * `errexit.c`: Manejo de errores.
 
-### 🔧 Modificación necesaria en `passivesock.c`
+### Modificación necesaria en `passivesock.c`
 
 El archivo original NO permitía usar:
 
@@ -148,7 +148,7 @@ else if ((sin.sin_port = htons((unsigned short)atoi(service))) == 0)
 
 Esto es un problema porque el comando FTP **PORT** requiere un **puerto temporal** asignado por el sistema operativo.
 
-#### ✔ Solución implementada
+#### Solución implementada
 
 Se agregó soporte explícito para `"0"`:
 
