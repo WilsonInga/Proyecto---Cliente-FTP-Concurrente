@@ -1,4 +1,3 @@
-
 /* clienteFTP.c - clienteFTP */
 
 #include <sys/types.h>
@@ -17,12 +16,9 @@
 #define LINELEN 1024
 #define BUFSIZE 4096
 
-/* Declaraciones de las funciones de biblioteca */
 extern int connectTCP(const char *host, const char *service);
 extern int passiveTCP(const char *service, int qlen);
 extern int errexit(const char *format, ...);
-
-/* --- Funciones Auxiliares Provistas --- */
 
 /* Envia cmds FTP al servidor, recibe respuestas y las despliega */
 void sendCmd(int s, char *cmd, char *res) {
@@ -48,7 +44,6 @@ void sendCmd(int s, char *cmd, char *res) {
     printf ("%s", res); // Usamos %s (sin \n) porque el servidor ya lo incluye
 }
 
-/* Lee una respuesta del servidor (sin enviar comando) */
 void readRes(int s, char *res) {
     int n = read (s, res, LINELEN); /* lee respuesta del svr */
     if (n < 0)
@@ -99,11 +94,11 @@ int activo(int s_ctrl) {
     char my_ip_str[INET_ADDRSTRLEN];
     unsigned int my_port;
     
-    // 1. Crear un socket pasivo en un puerto temporal (0)
+    // Crear un socket pasivo en un puerto temporal (0)
     // Usamos "0" para que el SO elija un puerto
     slisten = passiveTCP("0", 1); 
 
-    // 2. Obtener la IP y el puerto que nos asigno el SO
+    // Obtener la IP y el puerto que nos asigno el SO
     if (getsockname(slisten, (struct sockaddr *)&sin, &sin_len) < 0)
         errexit("getsockname: %s\n", strerror(errno));
     
@@ -116,7 +111,7 @@ int activo(int s_ctrl) {
         
     inet_ntop(AF_INET, &sin.sin_addr, my_ip_str, sizeof(my_ip_str));
     
-    // 3. Formatear el comando PORT h1,h2,h3,h4,p1,p2
+    // Formatear el comando PORT h1,h2,h3,h4,p1,p2
     // Reemplazamos los '.' de la IP por ','
     for (char *p = my_ip_str; *p; ++p) {
         if (*p == '.') *p = ',';
@@ -125,7 +120,7 @@ int activo(int s_ctrl) {
     // Formateamos el comando PORT
     sprintf(cmd, "PORT %s,%d,%d", my_ip_str, (my_port >> 8) & 0xFF, my_port & 0xFF);
     
-    // 4. Enviar el comando PORT
+    // Enviar el comando PORT
     sendCmd(s_ctrl, cmd, res);
     if (res[0] != '2') { // Esperamos un "200 PORT command successful."
         printf("Error: Comando PORT fallo.\n");
@@ -157,14 +152,13 @@ void salir (char *msg) {
     exit (1);
 }
 
-/* Manejador de senales para limpiar procesos hijos (zombies) */
+/* Manejador para limpiar procesos hijos difuntos */
 void reaper(int sig) {
     int status;
-    while (waitpid(-1, &status, WNOHANG) > 0)
-        ; // Limpia todos los hijos que hayan terminado
+    while (waitpid(-1, &status, WNOHANG) > 0); 
 }
 
-/* --- Funciones de Transferencia Concurrente --- */
+/* Funciones de Transferencia Concurrente */
 
 // Descarga un archivo (RETR)
 void do_get(int s_ctrl, char *filename) {
@@ -173,10 +167,10 @@ void do_get(int s_ctrl, char *filename) {
     char buffer[BUFSIZE];
     FILE *local_file;
 
-    sdata = pasivo(s_ctrl); // 1. Establecer canal de datos PASV
+    sdata = pasivo(s_ctrl); // Establecer canal de datos PASV
     if (sdata < 0) return;
 
-    sprintf(cmd, "RETR %s", filename); // 2. Enviar comando RETR
+    sprintf(cmd, "RETR %s", filename); // Enviar comando RETR
     sendCmd(s_ctrl, cmd, res);
 
     if (res[0] != '1') { // Esperamos "150 Opening data connection..."
@@ -185,10 +179,10 @@ void do_get(int s_ctrl, char *filename) {
         return;
     }
 
-    pid = fork(); // 3. Crear proceso hijo concurrente
+    pid = fork(); 
     if (pid < 0) errexit("fork: %s\n", strerror(errno));
     
-    if (pid == 0) { // --- Proceso Hijo (Esclavo) ---
+    if (pid == 0) { 
         close(s_ctrl); // El hijo no usa el canal de control
         
         local_file = fopen(filename, "wb");
@@ -205,9 +199,8 @@ void do_get(int s_ctrl, char *filename) {
         printf("...Descarga de %s completada...\n", filename);
         exit(0); // El hijo termina
     
-    } else { // --- Proceso Padre (Maestro) ---
+    } else { // Proceso Padre
         close(sdata); // El padre no usa el canal de datos
-        // 4. El padre espera la confirmacion en el canal de control
         readRes(s_ctrl, res); // Espera "226 Transfer complete."
     }
 }
@@ -219,7 +212,7 @@ void do_put(int s_ctrl, char *filename, int modo_activo) {
     char buffer[BUFSIZE];
     FILE *local_file;
 
-    /* --- PASO 1: Preparar la conexion --- */
+    /* Preparar la conexion */
     if (modo_activo) {
         // En modo activo, obtenemos el socket que ESCUCHA (todavia sin conexion)
         slisten = activo(s_ctrl);
@@ -230,8 +223,7 @@ void do_put(int s_ctrl, char *filename, int modo_activo) {
         if (sdata < 0) return;
     }
 
-    /* --- PASO 2: Enviar comando STOR --- */
-    // El servidor necesita esto ANTES de conectarse en modo activo
+    /* Enviar comando STOR */
     sprintf(cmd, "STOR %s", filename); 
     sendCmd(s_ctrl, cmd, res);
 
@@ -242,7 +234,7 @@ void do_put(int s_ctrl, char *filename, int modo_activo) {
         return;
     }
 
-    /* --- PASO 3: Completar conexion (Solo Modo Activo) --- */
+    /* Completar conexion (Solo Modo Activo) */
     if (modo_activo) {
         // AHORA que enviamos STOR, el servidor intentara conectarse. Aceptamos.
         sdata = accept(slisten, (struct sockaddr *)NULL, NULL);
@@ -253,11 +245,11 @@ void do_put(int s_ctrl, char *filename, int modo_activo) {
         }
     }
 
-    /* --- PASO 4: Transferencia (Fork) --- */
+    /*  Transferencia (Fork)*/
     pid = fork(); 
     if (pid < 0) errexit("fork: %s\n", strerror(errno));
     
-    if (pid == 0) { // --- Hijo ---
+    if (pid == 0) { // Hijo
         close(s_ctrl);
         
         local_file = fopen(filename, "rb");
@@ -277,7 +269,7 @@ void do_put(int s_ctrl, char *filename, int modo_activo) {
         printf("...Subida de %s completada...\n", filename);
         exit(0);
     
-    } else { // --- Padre ---
+    } else { // Padre
         close(sdata);
         readRes(s_ctrl, res); // Espera "226 Transfer complete."
     }
@@ -288,7 +280,7 @@ void do_dir(int s_ctrl) {
     char cmd[128], res[LINELEN];
     char buffer[BUFSIZE];
 
-    sdata = pasivo(s_ctrl); // 1. Establecer canal de datos PASV
+    sdata = pasivo(s_ctrl); // Establecer canal de datos PASV
     if (sdata < 0) return;
 
     sprintf(cmd, "LIST");
@@ -300,10 +292,10 @@ void do_dir(int s_ctrl) {
         return;
     }
 
-    pid = fork(); // 2. Crear proceso hijo concurrente
+    pid = fork(); // Crear proceso hijo concurrente
     if (pid < 0) errexit("fork: %s\n", strerror(errno));
     
-    if (pid == 0) { // --- Proceso Hijo (Esclavo) ---
+    if (pid == 0) { // Proceso Hijo 
         close(s_ctrl); // El hijo no usa el canal de control
         
         printf("...Listando directorio...\n");
@@ -315,20 +307,19 @@ void do_dir(int s_ctrl) {
         printf("...Fin del listado...\n");
         exit(0); // El hijo termina
     
-    } else { // --- Proceso Padre (Maestro) ---
+    } else { // Proceso Padre
         close(sdata); // El padre no usa el canal de datos
-        // 3. El padre espera la confirmacion en el canal de control
         readRes(s_ctrl, res); // Espera "226 Transfer complete."
     }
 }
 
 
-/* --- Programa Principal --- */
+/* Programa Principal */
 
 int main(int argc, char *argv[]) {
     int s_ctrl;         /* socket para el canal de control */
     char *host;
-    char *service = "ftp"; /* servicio default (puerto 21) */
+    char *service = "ftp"; /* servicio puerto 21 */
     char res[LINELEN];  /* buffer para respuestas del servidor */
     char cmd[LINELEN], arg[LINELEN]; /* comando y argumento del usuario */
     char user_cmd[LINELEN];
@@ -346,7 +337,7 @@ int main(int argc, char *argv[]) {
             exit(1);
     }
 
-    /* Instalar el manejador de senales para hijos zombies */
+    /* Instalar el manejador de senales para hijos difuntos */
     signal(SIGCHLD, reaper);
 
     /* Conectar al canal de control del servidor FTP */
@@ -357,7 +348,7 @@ int main(int argc, char *argv[]) {
     if (res[0] != '2')
         salir("Error: El servidor no esta listo.");
 
-    /* --- Autenticacion --- */
+    /* Autenticacion*/
     printf("Usuario (%s): ", host);
     fgets(user_cmd, sizeof(user_cmd), stdin);
     user_cmd[strcspn(user_cmd, "\n")] = 0; // Quitar newline
@@ -368,7 +359,6 @@ int main(int argc, char *argv[]) {
         salir("Error de autenticacion (USER).");
     
     /* Pedir contrasena */
-    // (Omitimos deshabilitar el eco de la terminal por simplicidad)
     printf("Contrasena: ");
     fgets(user_cmd, sizeof(user_cmd), stdin);
     user_cmd[strcspn(user_cmd, "\n")] = 0; // Quitar newline
@@ -378,14 +368,14 @@ int main(int argc, char *argv[]) {
     if (res[0] != '2') // Esperamos "230 User logged in"
         salir("Error de autenticacion (PASS).");
 
-    /* --- Bucle Principal de Comandos --- */
+    /* Bucle de Comandos */
     printf("\nCliente FTP concurrente. Escriba 'help' para ayuda.\n");
     
     while (1) {
         printf("ftp> ");
         
         if (fgets(user_cmd, sizeof(user_cmd), stdin) == NULL)
-            break; // Salir con Ctrl+D (EOF)
+            break; 
         
         /* Parsear el comando y el argumento */
         cmd[0] = arg[0] = '\0';
@@ -394,7 +384,7 @@ int main(int argc, char *argv[]) {
         if (cmd[0] == '\0') // No se ingreso nada
             continue;
 
-        /* --- Manejo de Comandos --- */
+        /* Manejo de Comandos */
 
         if (strncmp(cmd, "help", 4) == 0) {
             ayuda();
@@ -426,7 +416,6 @@ int main(int argc, char *argv[]) {
                 sendCmd(s_ctrl, cmd, res);
             }
         }
-        // --- Comandos Extra ---
         else if (strncmp(cmd, "pwd", 3) == 0) {
             sprintf(cmd, "PWD");
             sendCmd(s_ctrl, cmd, res); //
@@ -455,8 +444,7 @@ int main(int argc, char *argv[]) {
         else {
             printf("Comando desconocido. Escriba 'help' para ayuda.\n");
         }
-    } // Fin del while(1)
-
+    } 
     close(s_ctrl);
     printf("Sesion FTP finalizada.\n");
     return 0;
