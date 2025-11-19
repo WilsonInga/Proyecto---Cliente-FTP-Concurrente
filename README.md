@@ -1,66 +1,141 @@
-# Proyecto - Cliente FTP Concurrente
+# Cliente FTP Concurrente
 
-Este proyecto es una implementacion de un cliente FTP en C, disenado para ejecutarse en sistemas UNIX (Linux).
+Este proyecto implementa un cliente FTP funcional compatible con el estándar RFC 959. Soporta operaciones concurrentes mediante el uso de procesos, permitiendo mantener el canal de control activo mientras se realizan transferencias de datos en segundo plano. Además, soporta tanto el **Modo Pasivo** como el **Modo Activo**.
 
-El cliente implementa los comandos basicos del RFC 959 y utiliza **concurrencia** para manejar las transferencias de archivos, permitiendo que el canal de control permanezca activo mientras las transferencias de datos estan en progreso.
+## 1. Configuración del Servidor.
 
-## Caracteristicas
+Para que todas las funcionalidades del cliente funcionen correctamente, el servidor FTP `vsftpd` debe estar configurado para permitir escritura y conexiones activas.
 
-- **Concurrencia Real:** Utiliza `fork()` para crear un nuevo proceso hijo por cada transferencia de datos. Esto permite al proceso padre seguir aceptando comandos del usuario.
-- **Manejo de Modos de Datos:**
-  - **Modo Pasivo (PASV):** Implementado para los comandos `get`, `put`, y `dir`.
-  - **Modo Activo (PORT):** Implementado con el comando `pput`.
-- **Gestion de Procesos:** Incluye un manejador de senales `SIGCHLD` para limpiar procesos "difuntos" y evitar la saturacion de recursos del sistema.
-- **Comandos Implementados:**
-  - `USER <usuario>` y `PASS <clave>`
-  - `PASV` y `PORT`
-  - `RETR <archivo>` (get)
-  - `STOR <archivo>` (put/pput)
-  - `LIST` (dir)
-  - `CWD <dir>` (cd)
-  - `QUIT`
-  - `PWD`
-  - `MKD <dir>`
-  - `DELE <archivo>`
-  - `REST <bytes>`
+**Archivo:** `/etc/vsftpd.conf`
 
-## Arquitectura del Cliente
+```ini
+# Permitir usuarios locales y escritura
+local_enable=YES
+write_enable=YES
 
-El cliente opera bajo un modelo concurrente.
+# Permitir Modo Pasivo y Activo
+pasv_enable=YES
+port_enable=YES
 
-1. **Proceso Padre (Canal de Control):**
+# Configuración de seguridad para Modo Activo (Puerto 20)
+connect_from_port_20=YES
 
-   - Establece la conexion con el servidor vsftpd.
-   - Maneja la interaccion con el usuario.
-   - Envia comandos y recibe respuestas.
+# Solución al error 550 en chroot (Permitir escribir en la raíz)
+chroot_local_user=YES
+allow_writeable_chroot=YES
+```
 
-2. **Procesos Hijos (Canal de Datos):**
+**Nota:** Después reiniciar el servicio:
 
-   - Se crean mediante `fork()` cuando se ejecuta `get`, `put`, o `dir`.
-   - El proceso hijo realiza toda la transferencia de datos.
-   - El proceso padre continua atendiendo comandos del usuario.
+```bash
+sudo systemctl restart vsftpd
+```
 
-3. **Modo Activo (PORT):**
-   - Para `pput`, el cliente actua como servidor de datos.
-   - Usa `passiveTCP` para abrir un socket de escucha.
-   - **Requiere un puerto temporal (puerto 0)** para que el OS asigne un puerto libre.
-   - Esto **necessito modificar el archivo `passivesock.c` original**, el cual no aceptaba `service = "0"`.
+-----
 
-## Archivos del Proyecto
+## 2. Compilación
 
-- `clienteFTP.c`: Logica principal, concurrencia y manejo del protocolo FTP.
-- `Makefile`: Automatiza la compilacion.
-- `connectsock.c`: Crea sockets activos (cliente).
-- `connectTCP.c`: Wrapper para connectsock usando TCP.
-- `passivesock.c`: Biblioteca para crear sockets pasivos.
-  - **Modificado:** El codigo original trataba el servicio "0" como un error. Se agrego una condicion para permitir `service = "0"`, habilitando puertos temporales necesarios para el Modo Activo.
-- `passiveTCP.c`: Envoltorio para passivesock usando TCP.
-- `errexit.c`: Manejo de errores.
+El proyecto incluye un `Makefile` para automatizar la construcción.
 
----
+1.  **Limpiar compilaciones anteriores:**
 
-# Nota sobre la Modificacion en `passivesock.c`
+    ```bash
+    make clean
+    ```
 
+2.  **Compilar el proyecto:**
+
+    ```bash
+    make
+    ```
+
+    Esto generará el ejecutable binario `clienteFTP`.
+
+-----
+
+## 3. Preparación de Archivos de Prueba
+
+Para verificar la transferencia de archivos, se recomienda crear dos archivos de prueba en la carpeta del proyecto **antes** de ejecutar el cliente.
+
+1.  **Archivo pequeño (para pruebas rápidas):**
+
+    ```bash
+    echo "Hola Mundo FTP" > archivo_pequeno.txt
+    ```
+
+2.  **Archivo grande (para probar la concurrencia):**
+    Este comando crea un archivo de 50MB.
+
+    ```bash
+    dd if=/dev/zero of=archivo_grande.dat bs=1M count=50
+    ```
+
+-----
+
+## 4. Ejecución y Uso
+
+Ejecute el cliente indicando la dirección del servidor (use `localhost` para pruebas locales).
+
+```bash
+./clienteFTP localhost
+```
+
+Ingrese su usuario y contraseña del sistema cuando se le solicite.
+
+### Lista de Comandos
+
+| Comando | Descripción | Modo FTP |
+| :--- | :--- | :--- |
+| `help` | Muestra la ayuda. | - |
+| `pwd` | Muestra el directorio remoto actual. | - |
+| `dir` | Lista archivos del directorio remoto. | Pasivo |
+| `cd <dir>` | Cambia de directorio remoto. | - |
+| `mkdir <dir>` | Crea un directorio en el servidor. | - |
+| `dele <archivo>` | Borra un archivo en el servidor. | - |
+| `get <archivo>` | Descarga un archivo del servidor. | Pasivo |
+| `put <archivo>` | Sube un archivo al servidor. | Pasivo |
+| `pput <archivo>` | Sube un archivo usando **Modo Activo**. | **Activo (PORT)** |
+| `quit` | Cierra la sesión y sale. | - |
+
+-----
+
+## 5. Verificación de Funcionalidades Clave
+
+### A. Prueba de Concurrencia
+
+El objetivo es demostrar que el cliente no se bloquea durante una transferencia larga.
+
+1.  Inicie la subida del archivo grande:
+    `ftp> put archivo_grande.dat`
+2.  **Inmediatamente**, mientras se realiza la subida, escriba otro comando:
+    `ftp> pwd`
+3.  **Resultado Esperado:** El cliente debe responder con la ruta del directorio (`257 ...`) **antes** de que aparezca el mensaje `226 Transfer complete` de la subida.
+
+### B. Prueba de Modo Activo (`pput`)
+
+Verifica la implementación del comando `PORT`.
+
+1.  Ejecute: `ftp> pput archivo_pequeno.txt`
+2.  **Resultado Esperado:**
+      * El cliente abre un puerto local efímero.
+      * Envía `PORT h1,h2...`.
+      * Recibe `200 PORT command successful`.
+      * El servidor inicia la conexión y transfiere el archivo.
+
+-----
+
+## Notas de Implementación
+
+### Estructura de Archivos
+
+  * `clienteFTP.c`: Lógica principal, manejo de comandos y `fork()` para procesos hijos.
+  * `connectsock.c` / `connectTCP.c`: Funciones para crear conexiones salientes (Canal de Control y Datos en modo Pasivo).
+  * `passivesock.c` / `passiveTCP.c`: Funciones para crear sockets de escucha (Para modo Activo).
+  * `errexit.c`: Utilidad de manejo de errores.
+
+### Modificación Técnica Importante
+
+Se realizó una modificación en la Función **`passivesock.c`** original.
 El archivo `passivesock.c` original esta disenado solo para servidores que usan puertos fijos (ftp, telnet, etc.). Su comportamiento original es:
 
 ```
@@ -99,57 +174,3 @@ PORT h1,h2,h3,h4,p1,p2
 ```
 
 Sin esta modificacion, el Modo Activo (`pput`) no funcionaria.
-
----
-
-## Compilacion
-
-Para compilar:
-
-```
-make
-```
-
-Para limpiar:
-
-```
-make clean
-```
-
-## Uso
-
-```
-./clienteFTP <host> [puerto]
-```
-
----
-
-## Ejemplo de Sesion (Prueba de Concurrencia)
-
-Crear un archivo grande:
-
-```
-dd if=/dev/zero of=archivo_grande.dat bs=1M count=50
-```
-
-Conectarse y autenticarse:
-
-```
-./clienteFTP localhost
-```
-
-Probar concurrencia:
-
-```
-ftp> put archivo_grande.dat
-ftp> pwd
-257 "/home/usuario"
-```
-
-El comando `pwd` responde aun mientras el archivo se transfiere en segundo plano.
-
----
-
-## Autor
-
-- Wilson Inga
